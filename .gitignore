@@ -1,0 +1,19 @@
+# PyInstaller build artifacts
+dist/
+build/
+*.spec.bak
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Recorded experiment data
+recordings/
+
+# Analysis output
+*.png
+
+# VS Code / IDE
+.vscode/
+.idea/

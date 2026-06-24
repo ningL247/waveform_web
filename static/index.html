@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>下肢血流监测平台</title>
+<style>
+  :root {
+    --bg:#0b0f14; --panel:#141b24; --line:#1f2a36; --fg:#cdd6e0;
+    --accent:#39d3ff; --accent2:#7bed6f; --warn:#ffd23f; --danger:#ff6b9d;
+    --sb:264px;
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+    font-family:-apple-system,system-ui,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+    font-size:13px; overflow:hidden; }
+  body { display:flex; flex-direction:column; }
+
+  /* ── 顶部标题栏 ─────────────────────────────── */
+  header {
+    height:56px; padding:0 16px;
+    background:var(--panel); border-bottom:1px solid var(--line);
+    display:flex; align-items:center; gap:12px; flex-shrink:0;
+    position:relative;
+  }
+  .hdr-brand {
+    position:absolute; left:50%; top:50%;
+    transform:translate(-50%,-50%);
+    display:flex; align-items:center; gap:8px;
+    pointer-events:none;
+  }
+  .hdr-brand svg { flex-shrink:0; }
+  h1 { font-size:20px; font-weight:700; margin:0; letter-spacing:.06em; white-space:nowrap; }
+  .hdr-divider { width:1px; height:20px; background:var(--line); }
+  #status {
+    font-size:11px; padding:3px 10px; border-radius:12px;
+    background:#3a2330; color:#ff8a8a; white-space:nowrap; flex-shrink:0;
+  }
+  #status.ok { background:#0f3a2a; color:#5ef0b0; }
+  #csv-mode {
+    font-size:11px; padding:3px 10px; border-radius:12px;
+    background:#1a2a1a; color:var(--accent2); display:none; white-space:nowrap;
+  }
+  .legend { display:flex; gap:10px; font-size:12px; flex-wrap:wrap; flex:1; }
+  .legend span { display:flex; align-items:center; gap:4px; cursor:pointer; user-select:none; }
+  .legend span.off { opacity:.35; text-decoration:line-through; }
+  .dot { width:9px; height:9px; border-radius:50%; display:inline-block; flex-shrink:0; }
+
+  /* ── 主体(画布区 + 右侧栏) ────────────────── */
+  #main { flex:1; display:flex; min-height:0; }
+
+  /* 画布区 */
+  #canvas-area { flex:1; display:flex; flex-direction:column; min-width:0; min-height:0; }
+  canvas { display:block; width:100%; touch-action:none; }
+  #cv { flex:1; min-height:0; cursor:grab; }
+  #cv.dragging { cursor:grabbing; }
+  #spec { flex:1; min-height:0; border-top:1px solid var(--line); display:none; }
+  body.specon #spec { display:block; }
+
+  /* ── 右侧控制栏 ─────────────────────────────── */
+  #sidebar {
+    width:var(--sb); min-width:var(--sb);
+    background:var(--panel); border-left:1px solid var(--line);
+    display:flex; flex-direction:column; overflow-y:auto;
+  }
+  .sb-section { padding:10px 12px; border-bottom:1px solid var(--line); }
+  .sb-title {
+    font-size:10px; font-weight:700; letter-spacing:.12em;
+    text-transform:uppercase; color:#4a5a6a; margin-bottom:8px;
+  }
+  .sb-row {
+    display:flex; align-items:center; gap:6px;
+    margin-bottom:6px; flex-wrap:wrap;
+  }
+  .sb-row:last-child { margin-bottom:0; }
+  .sb-kv { display:flex; justify-content:space-between; align-items:center;
+    margin-bottom:5px; gap:4px; }
+  .sb-kv:last-child { margin-bottom:0; }
+  .sb-key { color:#5b6b7a; white-space:nowrap; }
+  .sb-val { color:var(--accent); font-variant-numeric:tabular-nums; text-align:right; }
+
+  /* ── 公共控件 ────────────────────────────────── */
+  button {
+    background:#1a2430; color:var(--fg); border:1px solid var(--line);
+    border-radius:7px; padding:6px 12px; font-size:12px; cursor:pointer;
+    white-space:nowrap; transition:background .1s;
+  }
+  button:active { background:#253545; }
+  button.on { border-color:var(--accent); color:var(--accent); }
+  button:disabled { opacity:.45; cursor:default; }
+  input[type=range] { width:100%; accent-color:var(--accent); }
+  input[type=number] {
+    width:52px; background:var(--bg); color:var(--fg);
+    border:1px solid var(--line); border-radius:6px;
+    padding:4px 6px; font-size:12px;
+  }
+  select {
+    background:var(--bg); color:var(--fg);
+    border:1px solid var(--line); border-radius:6px;
+    padding:4px 6px; font-size:12px;
+  }
+  .val { font-variant-numeric:tabular-nums; color:var(--accent); }
+  label { display:flex; align-items:center; gap:5px; white-space:nowrap; }
+
+  /* 信号状态卡片 */
+  .stat-card {
+    background:var(--bg); border-radius:8px;
+    padding:8px 10px; margin-bottom:6px;
+  }
+  .stat-card:last-child { margin-bottom:0; }
+  .stat-main { font-size:20px; font-weight:700; color:var(--accent);
+    font-variant-numeric:tabular-nums; line-height:1.2; }
+  .stat-sub { font-size:10px; color:#5b6b7a; margin-top:1px; }
+
+  /* 置信度色带 */
+  #conf-bar {
+    height:3px; border-radius:2px; margin-top:4px;
+    background:var(--line); overflow:hidden;
+  }
+  #conf-bar-fill { height:100%; width:0%; border-radius:2px; transition:width .4s,background .4s; }
+
+  /* 小工具提示 */
+  #offset-info { font-size:11px; color:var(--warn); }
+  #recinfo { font-size:11px; color:var(--accent2); word-break:break-all; }
+  #avginfo { font-size:11px; color:var(--accent2); }
+  #csv-pos { font-size:11px; color:var(--warn); }
+</style>
+</head>
+<body>
+
+<!-- ══ 顶部标题栏 ══════════════════════════════════════ -->
+<header>
+  <div class="hdr-brand">
+    <!-- 简单脉搏图标 -->
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#39d3ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="2,12 6,12 8,5 10,19 13,9 15,14 17,12 22,12"/>
+    </svg>
+    <h1>下肢血流监测平台</h1>
+  </div>
+  <div class="hdr-divider"></div>
+  <span id="status">未连接</span>
+  <span id="csv-mode"></span>
+  <div class="legend" id="legend"></div>
+</header>
+
+<!-- ══ 主体 ════════════════════════════════════════════ -->
+<div id="main">
+
+  <!-- 画布区 -->
+  <div id="canvas-area">
+    <canvas id="cv"></canvas>
+    <canvas id="spec"></canvas>
+  </div>
+
+  <!-- 右侧控制栏 -->
+  <aside id="sidebar">
+
+    <!-- § 串口连接 -->
+    <div class="sb-section" id="serial-section">
+      <div class="sb-title">串口连接</div>
+      <!-- 未连接时 -->
+      <div id="serial-disconnected">
+        <div class="sb-row">
+          <select id="port-select" style="flex:1;min-width:0">
+            <option value="">选择串口…</option>
+          </select>
+          <button id="port-refresh" title="刷新串口列表" style="padding:6px 8px">⟳</button>
+        </div>
+        <div class="sb-row">
+          <label style="flex:1">波特率
+            <select id="baud-select" style="flex:1">
+              <option value="9600">9600</option>
+              <option value="115200" selected>115200</option>
+            </select>
+          </label>
+        </div>
+        <div class="sb-row">
+          <button id="serial-connect" class="on" style="flex:1">连接</button>
+        </div>
+        <div id="serial-error" style="font-size:11px;color:#ff6b9d;margin-top:2px"></div>
+      </div>
+      <!-- 已连接时 -->
+      <div id="serial-connected" style="display:none">
+        <div class="sb-kv">
+          <span class="sb-key">端口</span>
+          <span class="sb-val" id="serial-port-label">—</span>
+        </div>
+        <div class="sb-row" style="margin-top:4px">
+          <button id="serial-disconnect" style="flex:1">断开</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- § 信号状态 -->
+    <div class="sb-section">
+      <div class="sb-title">信号状态</div>
+      <div class="stat-card">
+        <div class="stat-main" id="hrinfo">— bpm</div>
+        <div class="stat-sub">心率估计</div>
+        <div id="conf-bar"><div id="conf-bar-fill"></div></div>
+      </div>
+      <div class="sb-kv">
+        <span class="sb-key">Q 分</span>
+        <span class="sb-val" id="qval" title="HPS谐波得分: >30好 / 10-30可用 / <10弱">—</span>
+      </div>
+      <div class="sb-kv">
+        <span class="sb-key">f0 std</span>
+        <span class="sb-val" id="f0stdval" title="f0历史标准差: <0.10稳 / 0.10-0.20可用 / >0.20不稳">—</span>
+      </div>
+      <div class="sb-kv">
+        <span class="sb-key">采样率</span>
+        <span class="sb-val"><span id="sps">0</span> /s</span>
+      </div>
+      <div class="sb-kv">
+        <span class="sb-key">fs</span>
+        <span class="sb-val"><span id="fsv">?</span> Hz</span>
+      </div>
+      <div id="avginfo" style="font-size:11px;color:var(--accent2);margin-top:4px"></div>
+    </div>
+
+    <!-- § 显示 -->
+    <div class="sb-section">
+      <div class="sb-title">显示</div>
+      <div class="sb-row">
+        <button id="pause">⏸ 暂停</button>
+        <button id="auto" class="on">自动量程</button>
+      </div>
+      <div class="sb-row">
+        <button id="goto-latest" style="display:none">⏭ 最新</button>
+        <span id="offset-info"></span>
+      </div>
+      <div style="margin-top:4px">
+        <div class="sb-kv" style="margin-bottom:4px">
+          <span class="sb-key">窗口</span>
+          <span class="sb-val"><span id="winv">3000</span> 点</span>
+        </div>
+        <input id="win" type="range" min="200" max="20000" step="200" value="3000">
+      </div>
+    </div>
+
+    <!-- § 频谱 -->
+    <div class="sb-section">
+      <div class="sb-title">频谱</div>
+      <div class="sb-row">
+        <button id="spec-btn">📊 频谱</button>
+      </div>
+      <div class="sb-row">
+        <label>点数
+          <select id="nfft">
+            <option value="512">512</option>
+            <option value="1024">1024</option>
+            <option value="2048" selected>2048</option>
+            <option value="4096">4096</option>
+            <option value="8192">8192</option>
+          </select>
+        </label>
+        <span class="val" id="nfftres" style="font-size:11px">Δf —</span>
+      </div>
+    </div>
+
+    <!-- § 数据 -->
+    <div class="sb-section">
+      <div class="sb-title">数据</div>
+      <div class="sb-row">
+        <button id="rec">💾 保存数据</button>
+        <button id="clear-buf" title="清除当前采集缓冲区及显示">🗑 清除</button>
+      </div>
+      <div id="recinfo" style="margin-top:3px"></div>
+      <div class="sb-row" style="margin-top:6px">
+        <button id="import-btn">📂 导入 CSV</button>
+        <input type="file" id="csv-file" accept=".csv" style="display:none">
+      </div>
+      <!-- CSV 播放器(导入后显示) -->
+      <div id="csv-controls" style="display:none; margin-top:6px">
+        <div class="sb-row">
+          <button id="csv-play">▶ 播放</button>
+          <label>速度
+            <select id="csv-speed">
+              <option value="0.5">0.5×</option>
+              <option value="1" selected>1×</option>
+              <option value="2">2×</option>
+              <option value="5">5×</option>
+            </select>
+          </label>
+        </div>
+        <div id="csv-pos" style="margin-top:3px"></div>
+      </div>
+    </div>
+
+    <!-- § 算法 -->
+    <div class="sb-section">
+      <div class="sb-title">算法</div>
+      <div class="sb-row">
+        <button id="ext-btn" class="on">梳状提取</button>
+      </div>
+      <div class="sb-row" style="margin-top:4px">
+        <button id="avg-btn" class="on">同步平均</button>
+        <button id="avg-reset" title="清空模板，重新冷启动">↺ 重置</button>
+      </div>
+    </div>
+
+  </aside>
+</div><!-- #main -->
+
+<script>
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const spec = document.getElementById('spec');
+const sctx = spec.getContext('2d');
+const statusEl = document.getElementById('status');
+const legendEl = document.getElementById('legend');
+const COLORS = ['#39d3ff','#ffd23f','#7bed6f','#ff6b9d','#b08bff','#ff9f43','#5ef0b0','#ff5e57'];
+
+let channels = ['ch0'];
+let buffers = [[]];          // 每通道一个环形数组(用普通数组+裁剪)
+let winSize = 3000;          // 显示窗口点数
+let paused = false;
+let autoScale = true;
+let fixedMin = 0, fixedMax = 1200;
+let hidden = new Set();      // 隐藏的通道下标
+let currentFs = 250;         // 当前采样率(频谱频率轴用)
+let specOn = false;          // 频谱视图开关
+let NFFT = 2048;             // 频谱 FFT 点数(可调; 必须2的幂)
+let viewOffset = 0;          // 查看历史偏移(0=最新; 单位:样本)
+let csvMode = false;         // 是否处于CSV回放模式
+
+// ---- 高 DPI 画布 ----
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  for (const el of [cv, spec]) {
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height) continue;
+    el.width = r.width * dpr; el.height = r.height * dpr;
+    el.getContext('2d').setTransform(dpr,0,0,dpr,0,0);
+  }
+}
+window.addEventListener('resize', resize);
+
+// ---- 控件 ----
+const winEl = document.getElementById('win'), winv = document.getElementById('winv');
+winEl.oninput = () => { winSize = +winEl.value; winv.textContent = winSize; };
+document.getElementById('pause').onclick = e => {
+  paused = !paused; e.target.textContent = paused ? '▶ 继续' : '⏸ 暂停';
+  e.target.classList.toggle('on', paused);
+};
+document.getElementById('auto').onclick = e => {
+  autoScale = !autoScale; e.target.classList.toggle('on', autoScale);
+};
+document.getElementById('spec-btn').onclick = e => {
+  specOn = !specOn; e.target.classList.toggle('on', specOn);
+  document.body.classList.toggle('specon', specOn);
+  resize();
+};
+// ---- 频谱点数(NFFT)----
+const nfftEl = document.getElementById('nfft'), nfftResEl = document.getElementById('nfftres');
+function updNfftRes() {
+  const df = (currentFs || 250) / NFFT;
+  nfftResEl.textContent = `Δf ${df.toFixed(3)}Hz`;
+}
+nfftEl.onchange = () => { NFFT = +nfftEl.value; updNfftRes(); };
+updNfftRes();
+
+// ---- 串口连接 ----
+const portSelect    = document.getElementById('port-select');
+const baudSelect    = document.getElementById('baud-select');
+const portRefresh   = document.getElementById('port-refresh');
+const serialConnect = document.getElementById('serial-connect');
+const serialDisconn = document.getElementById('serial-disconnect');
+const serialConn    = document.getElementById('serial-connected');
+const serialDisc    = document.getElementById('serial-disconnected');
+const serialPortLbl = document.getElementById('serial-port-label');
+const serialError   = document.getElementById('serial-error');
+
+async function fetchPorts() {
+  portRefresh.textContent = '…';
+  try {
+    const r = await fetch('/ports');
+    const ports = await r.json();
+    const prev = portSelect.value;
+    portSelect.innerHTML = '<option value="">选择串口…</option>';
+    ports.forEach(p => {
+      const o = document.createElement('option');
+      o.value = p.device;
+      o.textContent = `${p.device}  ${p.description || ''}`.trim();
+      portSelect.appendChild(o);
+    });
+    if (prev && [...portSelect.options].some(o => o.value === prev)) portSelect.value = prev;
+  } catch(e) { console.error('fetchPorts', e); }
+  portRefresh.textContent = '⟳';
+}
+
+portRefresh.onclick = fetchPorts;
+fetchPorts();  // 页面加载时自动获取一次
+
+serialConnect.onclick = () => {
+  const port = portSelect.value;
+  if (!port) { serialError.textContent = '请先选择串口'; return; }
+  serialError.textContent = '';
+  serialConnect.disabled = true; serialConnect.textContent = '连接中…';
+  if (socket && socket.readyState === 1)
+    socket.send(JSON.stringify({ cmd:'connect', port, baud: baudSelect.value }));
+};
+serialDisconn.onclick = () => {
+  if (socket && socket.readyState === 1)
+    socket.send(JSON.stringify({ cmd:'disconnect' }));
+};
+
+function setSerialState(msg) {
+  if (msg.connected) {
+    serialConn.style.display = '';  serialDisc.style.display = 'none';
+    serialPortLbl.textContent = `${msg.port}  @ ${msg.baud}`;
+    serialError.textContent = '';
+  } else {
+    serialConn.style.display = 'none'; serialDisc.style.display = '';
+    serialConnect.disabled = false; serialConnect.textContent = '连接';
+    if (msg.error) serialError.textContent = msg.error;
+  }
+}
+
+// ---- fs 显示 ----
+const fsvEl = document.getElementById('fsv');
+
+// ---- 提取(谐波梳状)控件 ----
+const extBtn = document.getElementById('ext-btn');
+const hrInfo = document.getElementById('hrinfo');
+const qValEl    = document.getElementById('qval');
+const f0StdEl   = document.getElementById('f0stdval');
+let extEnabled = true;
+extBtn.onclick = () => {
+  extEnabled = !extEnabled; extBtn.classList.toggle('on', extEnabled);
+  if (socket && socket.readyState === 1) socket.send(JSON.stringify({ cmd: 'extract', enabled: extEnabled }));
+};
+let extractConfidence = 0;   // 0=极低 / 1=低置信 / 2=可用 — 控制提取/平均曲线透明度
+const confBarFill = document.getElementById('conf-bar-fill');
+function setExtractState(msg) {
+  extEnabled = !!msg.enabled; extBtn.classList.toggle('on', extEnabled);
+  if (!extEnabled) {
+    hrInfo.textContent = '— bpm'; confBarFill.style.width='0%';
+    qValEl.textContent = '—'; qValEl.style.color = '';
+    f0StdEl.textContent = '—'; f0StdEl.style.color = '';
+    return;
+  }
+  const conf = msg.confidence ?? (msg.reliable ? 2 : 0);
+  extractConfidence = conf;
+  const colors = ['#ff4444','#ffd23f','#39d3ff'];
+  const widths  = ['33%','66%','100%'];
+  confBarFill.style.width    = widths[conf]  ?? '0%';
+  confBarFill.style.background = colors[conf] ?? '#ff4444';
+  hrInfo.textContent = msg.hr ? `${msg.hr} bpm` : '锁定中…';
+  // Q 分显示 + 颜色分级
+  if (msg.q != null) {
+    qValEl.textContent = msg.q.toFixed(1);
+    qValEl.style.color = msg.q >= 30 ? '#7bed6f' : msg.q >= 10 ? '#ffd23f' : '#ff6b9d';
+  }
+  // f0_std 显示 + 颜色分级
+  if (msg.f0_std != null) {
+    f0StdEl.textContent = msg.f0_std.toFixed(3) + ' Hz';
+    f0StdEl.style.color = msg.f0_std < 0.10 ? '#7bed6f'
+                        : msg.f0_std < 0.20 ? '#39d3ff'
+                        : msg.f0_std < 0.35 ? '#ffd23f' : '#ff6b9d';
+  }
+}
+
+// ---- 同步平均(coherent averaging)控件 ----
+const avgBtn = document.getElementById('avg-btn');
+const avgInfo = document.getElementById('avginfo');
+let avgEnabled = true;
+avgBtn.onclick = () => {
+  avgEnabled = !avgEnabled; avgBtn.classList.toggle('on', avgEnabled);
+  if (socket && socket.readyState === 1) socket.send(JSON.stringify({ cmd: 'average', enabled: avgEnabled }));
+};
+function setAverageState(msg) {
+  avgEnabled = !!msg.enabled; avgBtn.classList.toggle('on', avgEnabled);
+  if (!avgEnabled) { avgInfo.textContent = ''; return; }
+  let txt;
+  if (msg.startup) {
+    txt = `等待稳定 ${msg.startup}s…`;
+  } else if (msg.bootstrapping) {
+    txt = `校准中 ${msg.boot_pool || 0}/${8} 拍`;
+  } else if (!msg.ready) {
+    txt = `平均中…(${msg.beats || 0}/3 拍)`;
+  } else {
+    txt = `已平均 ${msg.beats} 拍`;
+    if (msg.rejected > 0)  txt += `  拒 ${msg.rejected}`;
+    if (msg.resets   > 0)  txt += `  重置 ${msg.resets}`;
+  }
+  avgInfo.textContent = txt;
+}
+
+// ---- 采样率统计 ----
+let sampleCount = 0;
+setInterval(() => {
+  document.getElementById('sps').textContent = sampleCount;
+  sampleCount = 0;
+}, 1000);
+
+// ---- WebSocket ----
+let socket = null;
+const recBtn  = document.getElementById('rec');
+const recInfo = document.getElementById('recinfo');
+
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  socket = ws;
+  ws.onopen = () => { statusEl.textContent = '已连接'; statusEl.classList.add('ok'); };
+  ws.onclose = () => {
+    statusEl.textContent = '断开,重连中…'; statusEl.classList.remove('ok');
+    setTimeout(connect, 1500);
+  };
+  ws.onmessage = ev => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'serial_state') { setSerialState(msg); }
+    else if (msg.type === 'meta') { setChannels(msg.channels); }
+    else if (msg.type === 'rec') { setRecState(msg); }
+    else if (msg.type === 'fs') { setFsState(msg); }
+    else if (msg.type === 'extract') { setExtractState(msg); }
+    else if (msg.type === 'average') { setAverageState(msg); }
+    else if (msg.type === 'data') {
+      if (paused) return;
+      for (const frame of msg.frames) {
+        for (let i = 0; i < frame.length && i < buffers.length; i++) {
+          const b = buffers[i]; b.push(frame[i]);
+          if (b.length > 60000) b.splice(0, b.length - 60000);
+        }
+        sampleCount++;
+      }
+    }
+  };
+}
+
+function setRecState(msg) {
+  recBtn.disabled = false;
+  recBtn.textContent = '💾 保存数据';
+  recBtn.classList.remove('on');
+  if (msg.path) {
+    const name  = msg.path.split(/[\\/]/).pop();
+    const secs  = (msg.count / (currentFs || 250)).toFixed(1);
+    recInfo.textContent = `已保存 ${name}  (${msg.count} 点 / ${secs}s)`;
+  } else if (msg.path === null && msg.count === 0) {
+    recInfo.textContent = '缓冲区为空, 未保存';
+  }
+}
+
+recBtn.onclick = () => {
+  if (!socket || socket.readyState !== 1) return;
+  recBtn.disabled = true;
+  recBtn.textContent = '保存中…';
+  recInfo.textContent = '';
+  socket.send(JSON.stringify({ cmd: 'save_buffer' }));
+};
+
+const clearBufBtn = document.getElementById('clear-buf');
+clearBufBtn.onclick = () => {
+  // 清空前端显示缓冲
+  for (let i = 0; i < buffers.length; i++) buffers[i] = [];
+  viewOffset = 0;
+  updateOffsetUI();
+  recInfo.textContent = '';
+  // 同时清空服务端历史缓冲
+  if (socket && socket.readyState === 1)
+    socket.send(JSON.stringify({ cmd: 'clear_buffer' }));
+};
+
+function setChannels(names) {
+  channels = names;
+  buffers = names.map(() => []);
+  hidden = new Set();
+  // 默认隐藏"原始"通道(名字不含 提取/平均 的), 显示提取 + 平均
+  names.forEach((n, i) => {
+    if (!n.includes('提取') && !n.includes('平均')) hidden.add(i);
+  });
+  renderLegend();
+}
+
+function renderLegend() {
+  legendEl.innerHTML = '';
+  channels.forEach((n, i) => {
+    const span = document.createElement('span');
+    span.className = hidden.has(i) ? 'off' : '';
+    span.innerHTML = `<i class="dot" style="background:${COLORS[i%COLORS.length]}"></i>${n}`;
+    span.title = '点击显示/隐藏';
+    span.onclick = () => { hidden.has(i) ? hidden.delete(i) : hidden.add(i); renderLegend(); };
+    legendEl.appendChild(span);
+  });
+}
+
+function setFsState(msg) {
+  if (msg.fs != null && msg.fs > 0) {
+    fsvEl.textContent = msg.fs;
+    currentFs = msg.fs;
+    updNfftRes();
+  }
+}
+
+// ---- 绘制循环 ----
+function draw() {
+  const w = cv.clientWidth, h = cv.clientHeight;
+  ctx.clearRect(0,0,w,h);
+
+  // viewOffset 限制在有效范围内
+  const maxOff = buffers[0] ? Math.max(0, buffers[0].length - winSize) : 0;
+  if (viewOffset > maxOff) viewOffset = maxOff;
+
+  // 求 Y 量程
+  let lo = Infinity, hi = -Infinity;
+  if (autoScale) {
+    for (let c = 0; c < buffers.length; c++) {
+      if (hidden.has(c)) continue;
+      const b = buffers[c];
+      const end = b.length - viewOffset;
+      const start = Math.max(0, end - winSize);
+      for (let i = start; i < end; i++) {
+        const v = b[i]; if (v < lo) lo = v; if (v > hi) hi = v;
+      }
+    }
+    if (lo === Infinity) { lo = 0; hi = 1; }
+    if (hi === lo) { hi += 1; lo -= 1; }
+    const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+  } else { lo = fixedMin; hi = fixedMax; }
+
+  // 网格
+  ctx.strokeStyle = '#1f2a36'; ctx.lineWidth = 1; ctx.fillStyle = '#5b6b7a';
+  ctx.font = '11px monospace'; ctx.textBaseline = 'middle';
+  const rows = 5;
+  for (let r = 0; r <= rows; r++) {
+    const y = h * r / rows;
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke();
+    const val = hi - (hi - lo) * r / rows;
+    ctx.fillText(val.toFixed(1), 4, y + (r===0?6:r===rows?-6:0));
+  }
+
+  // 波形
+  for (let c = 0; c < buffers.length; c++) {
+    if (hidden.has(c)) continue;
+    const b = buffers[c];
+    const end = b.length - viewOffset;
+    const start = Math.max(0, end - winSize);
+    const n = end - start;
+    if (n < 2) continue;
+    const isProcessed = channels[c] && (channels[c].includes('提取') || channels[c].includes('平均'));
+    ctx.globalAlpha = isProcessed ? [0.3, 0.6, 1.0][extractConfidence] ?? 1.0 : 1.0;
+    ctx.strokeStyle = COLORS[c % COLORS.length]; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    const step = Math.max(1, Math.floor(n / w));
+    let first = true;
+    for (let i = 0; i < n; i += step) {
+      const v = b[start + i];
+      const x = w * i / (n - 1);
+      const y = h * (1 - (v - lo) / (hi - lo));
+      if (first) { ctx.moveTo(x,y); first = false; } else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+  }
+
+  ctx.globalAlpha = 1.0;
+  // 当前查看位置的值(viewOffset=0时为最新值)
+  ctx.textBaseline = 'top';
+  let row = 0;
+  for (let c = 0; c < buffers.length; c++) {
+    if (hidden.has(c)) continue;
+    const b = buffers[c]; if (!b.length) continue;
+    const idx = Math.max(0, b.length - 1 - viewOffset);
+    ctx.fillStyle = COLORS[c % COLORS.length];
+    ctx.fillText(`${channels[c]}: ${b[idx].toFixed(2)}`, w - 160, 6 + row*14);
+    row++;
+  }
+  requestAnimationFrame(draw);
+}
+
+// ---- 频谱 (FFT) ----
+function fft(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { const tr = re[i]; re[i] = re[j]; re[j] = tr; const ti = im[i]; im[i] = im[j]; im[j] = ti; }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang), half = len >> 1;
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let k = 0; k < half; k++) {
+        const idx = i + k, jdx = idx + half;
+        const xr = re[jdx] * cr - im[jdx] * ci, xi = re[jdx] * ci + im[jdx] * cr;
+        re[jdx] = re[idx] - xr; im[jdx] = im[idx] - xi;
+        re[idx] += xr; im[idx] += xi;
+        const ncr = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = ncr;
+      }
+    }
+  }
+}
+
+const MAXHZ = 15, DBFLOOR = -50;
+function drawSpec() {
+  const w = spec.clientWidth, h = spec.clientHeight;
+  if (!w || !h) return;
+  sctx.clearRect(0, 0, w, h);
+  const fs = currentFs || 250, binHz = fs / NFFT;
+  const maxBin = Math.min(NFFT >> 1, Math.max(2, Math.floor(MAXHZ / binHz)));
+  // 频率网格 + 标签
+  sctx.strokeStyle = '#1f2a36'; sctx.lineWidth = 1; sctx.fillStyle = '#5b6b7a';
+  sctx.font = '10px monospace'; sctx.textBaseline = 'bottom'; sctx.textAlign = 'center';
+  for (let f = 0; f <= MAXHZ; f += 2) {
+    const x = w * f / MAXHZ;
+    sctx.beginPath(); sctx.moveTo(x, 0); sctx.lineTo(x, h); sctx.stroke();
+    sctx.fillText(f + 'Hz', x, h - 1);
+  }
+  const annot = [];
+  for (let c = 0; c < buffers.length; c++) {
+    if (hidden.has(c)) continue;
+    const b = buffers[c]; if (b.length < NFFT) continue;
+    const re = new Float64Array(NFFT), im = new Float64Array(NFFT);
+    const specEnd = b.length - viewOffset;
+    const start = specEnd - NFFT;
+    if (start < 0) continue;
+    let mean = 0; for (let i = 0; i < NFFT; i++) mean += b[start + i]; mean /= NFFT;
+    for (let i = 0; i < NFFT; i++) { const win = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (NFFT - 1)); re[i] = (b[start + i] - mean) * win; }
+    fft(re, im);
+    let mmax = 1e-12, pk = 0, pkm = 0;
+    const mag = new Float64Array(maxBin);
+    for (let k = 1; k < maxBin; k++) { const m = Math.hypot(re[k], im[k]); mag[k] = m; if (m > mmax) mmax = m; const f = k * binHz; if (f >= 0.7 && f <= 3 && m > pkm) { pkm = m; pk = f; } }
+    sctx.strokeStyle = COLORS[c % COLORS.length]; sctx.lineWidth = 1.4; sctx.beginPath();
+    for (let k = 1; k < maxBin; k++) {
+      const db = Math.max(DBFLOOR, 20 * Math.log10(mag[k] / mmax + 1e-12));
+      const x = w * (k * binHz) / MAXHZ;
+      const y = h * (1 - (db - DBFLOOR) / (0 - DBFLOOR));
+      if (k === 1) sctx.moveTo(x, y); else sctx.lineTo(x, y);
+    }
+    sctx.stroke();
+    if (pk > 0) annot.push({ c, pk });
+  }
+  sctx.textAlign = 'left'; sctx.textBaseline = 'top';
+  annot.forEach((a, r) => {
+    sctx.fillStyle = COLORS[a.c % COLORS.length];
+    sctx.fillText(`峰 ${a.pk.toFixed(2)} Hz (${Math.round(a.pk * 60)} bpm)`, 6, 4 + r * 13);
+  });
+}
+setInterval(() => { if (specOn) drawSpec(); }, 150);
+
+// ---- 同步平均手动重置 ----
+document.getElementById('avg-reset').onclick = () => {
+  if (socket && socket.readyState === 1)
+    socket.send(JSON.stringify({ cmd: 'average_reset' }));
+};
+
+// ---- CSV 播放器 ----
+const csvControlsEl = document.getElementById('csv-controls');
+const csvPlayBtn    = document.getElementById('csv-play');
+const csvSpeedEl    = document.getElementById('csv-speed');
+const csvPosEl      = document.getElementById('csv-pos');
+let csvPlaying = false;
+let csvPlayTimer = null;
+
+function csvTotalSamples() { return buffers[0] ? buffers[0].length : 0; }
+
+function updateCsvPos() {
+  if (!csvMode) return;
+  const fs = currentFs || 250;
+  const total = csvTotalSamples();
+  // viewOffset=0 → 最末尾(最新), viewOffset=max → 最开头(最老)
+  const cur = total - viewOffset;
+  csvPosEl.textContent = `${(cur/fs).toFixed(1)}s / ${(total/fs).toFixed(1)}s`;
+}
+
+function stopCsvPlay() {
+  csvPlaying = false;
+  clearInterval(csvPlayTimer); csvPlayTimer = null;
+  csvPlayBtn.textContent = '▶ 播放';
+  csvPlayBtn.classList.remove('on');
+}
+
+function startCsvPlay() {
+  if (!csvMode) return;
+  // 若已在末尾则从头开始
+  const maxOff = Math.max(0, csvTotalSamples() - winSize);
+  if (viewOffset === 0) viewOffset = maxOff;
+  csvPlaying = true;
+  csvPlayBtn.textContent = '⏸ 暂停';
+  csvPlayBtn.classList.add('on');
+  const FPS = 30;
+  csvPlayTimer = setInterval(() => {
+    const speed = parseFloat(csvSpeedEl.value) || 1;
+    const step  = Math.max(1, Math.round((currentFs || 250) * speed / FPS));
+    viewOffset  = Math.max(0, viewOffset - step);
+    updateOffsetUI();
+    updateCsvPos();
+    if (viewOffset === 0) stopCsvPlay();   // 播放到末尾
+  }, 1000 / FPS);
+}
+
+csvPlayBtn.onclick = () => {
+  if (csvPlaying) stopCsvPlay(); else startCsvPlay();
+};
+
+// 拖拽时同步更新进度显示
+const _origUpdOffsetUI = updateOffsetUI;
+
+// ---- 鼠标拖拽平移波形 ----
+const offsetInfoEl   = document.getElementById('offset-info');
+const gotoLatestBtn  = document.getElementById('goto-latest');
+let dragStartX = null, dragStartOffset = 0;
+
+function updateOffsetUI() {
+  if (viewOffset > 0) {
+    const secs = (viewOffset / (currentFs || 250)).toFixed(1);
+    offsetInfoEl.textContent = `◀ ${secs}s 前`;
+    gotoLatestBtn.style.display = '';
+  } else {
+    offsetInfoEl.textContent = '';
+    gotoLatestBtn.style.display = 'none';
+  }
+  if (csvMode) updateCsvPos();
+}
+
+cv.addEventListener('mousedown', e => {
+  if (e.button !== 0) return;
+  dragStartX = e.clientX;
+  dragStartOffset = viewOffset;
+  cv.classList.add('dragging');
+});
+window.addEventListener('mousemove', e => {
+  if (dragStartX === null) return;
+  const dx = e.clientX - dragStartX;
+  // 拖左 = 往过去看(offset增大), 拖右 = 往最新看(offset减小)
+  const spx = winSize / (cv.clientWidth || 1);
+  const newOff = Math.round(dragStartOffset - dx * spx);
+  const maxOff = buffers[0] ? Math.max(0, buffers[0].length - winSize) : 0;
+  viewOffset = Math.max(0, Math.min(newOff, maxOff));
+  updateOffsetUI();
+});
+window.addEventListener('mouseup', () => {
+  dragStartX = null;
+  cv.classList.remove('dragging');
+});
+
+gotoLatestBtn.onclick = () => {
+  viewOffset = 0;
+  updateOffsetUI();
+};
+
+// ---- CSV 导入 ----
+const csvModeEl  = document.getElementById('csv-mode');
+const importBtn  = document.getElementById('import-btn');
+const csvFileEl  = document.getElementById('csv-file');
+
+importBtn.onclick = () => csvFileEl.click();
+
+csvFileEl.onchange = e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const lines = ev.target.result.split(/\r?\n/).filter(l => l.trim());
+    if (!lines.length) return;
+
+    // 判断首行是否为表头(含非数字字符)
+    const firstCells = lines[0].split(',');
+    let names, dataLines;
+    if (isNaN(parseFloat(firstCells[0]))) {
+      names = firstCells.map(s => s.trim());
+      dataLines = lines.slice(1);
+    } else {
+      names = firstCells.map((_, i) => `ch${i}`);
+      dataLines = lines;
+    }
+
+    // 解析数据
+    const ncols = names.length;
+    const cols = Array.from({length: ncols}, () => []);
+    for (const line of dataLines) {
+      const vals = line.split(',');
+      for (let i = 0; i < ncols; i++) {
+        const v = parseFloat(vals[i]);
+        if (isFinite(v)) cols[i].push(v);
+      }
+    }
+    if (!cols[0].length) return;
+
+    // 进入 CSV 模式
+    csvMode = true;
+    channels = names;
+    buffers  = cols;
+    hidden   = new Set();
+    // 默认隐藏原始(同实时模式规则)
+    names.forEach((n, i) => {
+      if (!n.includes('提取') && !n.includes('平均')) hidden.add(i);
+    });
+    // 全部隐藏时显示第0列
+    if (hidden.size === names.length) hidden.delete(0);
+    renderLegend();
+
+    // 停止旧播放, 从头开始
+    stopCsvPlay();
+    viewOffset = Math.max(0, cols[0].length - winSize);  // 从数据起点开始
+    updateOffsetUI();
+
+    // 显示 CSV 播放控件
+    csvControlsEl.style.display = 'block';
+    updateCsvPos();
+
+    // 显示文件名和时长
+    const dur = (cols[0].length / (currentFs || 250)).toFixed(1);
+    csvModeEl.textContent = `📂 ${file.name}  (${cols[0].length} 点 / ${dur}s)`;
+    csvModeEl.style.display = '';
+
+    // CSV 模式自动暂停实时更新
+    if (!paused) {
+      paused = true;
+      document.getElementById('pause').textContent = '▶ 继续';
+      document.getElementById('pause').classList.add('on');
+    }
+
+    // 重置文件选择框(允许重复导入同名文件)
+    csvFileEl.value = '';
+  };
+  reader.readAsText(file, 'UTF-8');
+};
+
+resize();
+connect();
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
